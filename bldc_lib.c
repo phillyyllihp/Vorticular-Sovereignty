@@ -15,6 +15,10 @@ Author: Luke Phillips
 
 -----------------------------------------------------------------------------------------------*/
 static inline void __init__(void) {
+    // enable IO port clocks 
+    io_port_en(('A'-'A'), 1);
+    io_port_en(('B'-'A'), 1);
+
     // define pins and mode for hall sensor interface 
     uint16_t hall_A = PIN('A', 1);
     gpio_set_mode(hall_A, GPI_MODE);
@@ -25,6 +29,9 @@ static inline void __init__(void) {
 
     // initialize 3 channels on timer 3 to be used for PWM 
     __tim3_pwm_init__();
+
+    // initialize systick 
+    SysTick_init(1000);
 
     // define pins for H-Bridge interface (set up pins with timers properly)
     uint16_t A_high = PIN('A', 6);        // timer 3 channel 1 
@@ -43,13 +50,7 @@ static inline void __init__(void) {
     gpio_set_mode(B_low, GPO_MODE);
     uint16_t C_low = PIN('B', 5);
     gpio_set_mode(C_low, GPO_MODE);
-
-    // enable IO port clocks 
-    io_port_en('A', 1);
-    io_port_en('B', 1);
 }
-
-
 
 
 /*_____________________________________________________________________________________________

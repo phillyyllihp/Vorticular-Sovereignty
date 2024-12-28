@@ -4,16 +4,18 @@ MAIN FOR VORTICULAR SOVEREIGNTY
 Author: Luke Phillips
 */
 
-#include "hal.c"
+
 #include "bldc_lib.c"
+
 
 int main(void){
 
-    // initialization
-    __init__();
+   // initialize chip 
+   __init__();
 
     // main loop
-    while(1){
+    while(1){      
+
       /* implement FOC controls  outer loop -> Position: PID with input approximated from fused hall and encoder data
                                  middle loop -> Speed: PID with input of derivative of position approximation
                                  inner loop -> torque: following steps

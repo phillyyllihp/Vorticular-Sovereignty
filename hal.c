@@ -45,12 +45,12 @@ static inline void gpio_set_af(uint16_t pin, uint8_t af) {
   struct gpio *gpio = GPIO(PINBANK(pin));
   int n = PINNO(pin);
   if (n <= 7) {
-    gpio->AFRL &= ~(15U << (n * 4));
-    gpio->AFRL |= (af & 7) << (n * 4);
+    gpio->AFRL &= ~(15U << (n * 4));          // clear previous setting 
+    gpio->AFRL |= (af & 7) << (n * 4);        // write new setting 
   }
   else {
-    gpio->AFRL &= ~(15U << ((n-8) * 4));
-    gpio->AFRL |= (af & 7) << ((n-8) * 4);
+    gpio->AFRH &= ~(15U << ((n-8) * 4));      // clear previous setting 
+    gpio->AFRH |= (af & 7) << ((n-8) * 4);    // write new setting 
   }
 }
 
@@ -152,7 +152,6 @@ struct tim1 {
 
 // need input timer 
 
-
 /*_____________________________________________________________________________________________
 
                                 Timer 3 Setup 
@@ -160,7 +159,7 @@ struct tim1 {
 -----------------------------------------------------------------------------------------------*/
 
 struct tim3 {
-  volatile uint32_t CR1, CR2, SMCR, DIER, SR, EGR, CCMR1_OCm, CCMR1_ICm, CCMR2_OCm, CCMR2_ICm, CCER, CNT, PSC,
+  volatile uint32_t CR1, CR2, SMCR, DIER, SR, EGR, CCMR1, CCMR2, CCER, CNT, PSC,
       ARR, BLANK1, CCR1, CCR2, CCR3, CCR4, BLANK2, DCR, DMAR, AF1, BLANK3, TISEL;
 };
 #define TIM3 ((struct tim3 *) 0x40000400)
@@ -168,41 +167,41 @@ struct tim3 {
 // function to initialize PMW output on channels 1, 2 & 3
 // channel ports are set when initializing the gpio's 
 static inline void __tim3_pwm_init__(void) {
-  TIM3->CR1 |= BIT(7);                   // enable auto reload preload register
-  TIM3->CCMR1_OCm |= (0b1101 << 3);      // set channel 1 to OC PWM1 mode and enable the OC1 preload register
-  TIM3->CCMR1_OCm |= (0b1101 << 11);     // set channel 2 to OC PWM1 mode enable the OC2 preload register
-  TIM3->CCMR2_OCm |= (0b1101 << 3);      // set channel 3 to OC PWM1 mode and enable the OC3 preload register
+  uint16_t max_psc = 16000000/250000-1;    // internal oscillator runs at 16MHz / desired switching speed for transistors in H-Bridge
+  RCC->APBENR1 |= BIT(1);                  // enable timer3 peripheral clock 
+  RCC->APBRSTR1 |= BIT(1);                 // reset timer3 
+  RCC->APBRSTR1 &= ~BIT(1);                // clear timer3 reset bit
+  TIM3->CR1 |= BIT(7);                     // enable auto reload preload register
+  TIM3->CCMR1 |= (0b1101 << 3);            // set channel 1 to OC PWM1 mode and enable the OC1 preload register
+  TIM3->CCMR1 |= (0b1101 << 11);           // set channel 2 to OC PWM1 mode enable the OC2 preload register
+  TIM3->CCMR2 |= (0b1101 << 3);            // set channel 3 to OC PWM1 mode and enable the OC3 preload register
+  TIM3->PSC = max_psc;                     // set prescaler to 64 (250kHz)  
+  TIM3->CR1 |= BIT(0);                     // enable counter
 }
 
 // function to change the Auto reload register (ARR) - used for setting PWM frequency 
-static inline void tim3_pwm_freq(uint32_t freq) {
-  TIM3->ARR &= ~(0xFFFFFFFF);             // clear previous setting
-  TIM3->ARR |= freq;                      // pass new setting into register
+static inline void tim3_pwm_freq(uint16_t freq) {
+  TIM3->ARR = freq;                       // pass new setting into register
+  TIM3->EGR |= BIT(0);                     // generate update event
+  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
 }
 
 // funtion to change duty cycles for pwm channels 1, 2, & 3
 // OCxPE bit in the CCMRx register must be set for these to update at update events
-static inline void tim3_pwm_duty(uint32_t c1_duty, uint32_t c2_duty, uint32_t c3_duty) {
-  //clear and set channel 1
-  TIM3->CCR1 &= ~(0xFFFFFFFF);             // clear previous setting 
-  TIM3->CCR1 |= c1_duty;                   // pass new setting into register
-
-  // clear and set channel 2
-  TIM3->CCR2 &= ~(0xFFFFFFFF);             // clear previous setting 
-  TIM3->CCR2 |= c2_duty;                   // pass new setting into register
-
-  // clear and set channel 3
-  TIM3->CCR3 &= ~(0xFFFFFFFF);             // clear previous setting 
-  TIM3->CCR3 |= c2_duty;                   // pass new setting into register
+static inline void tim3_pwm_duty(uint16_t c1_duty, uint16_t c2_duty, uint16_t c3_duty) {
+  
+  TIM3->CCR1 = c1_duty;                    // pass new setting into register
+  TIM3->CCR2 = c2_duty;                    // pass new setting into register
+  TIM3->CCR3 = c2_duty;                    // pass new setting into register
+  TIM3->EGR |= BIT(0);                     // generate update event
+  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
 }
-
 
 /*_____________________________________________________________________________________________
 
                                 INTERRUPTS
 
 ------------------------------------------------------------------------------------------------*/
-
 
 // create a structure for the NVIC registers
 struct nvic {
@@ -268,3 +267,4 @@ void EXTI4_15_Handler(void) {
 }
 
 //_____________________________________________________________________________________________//
+
