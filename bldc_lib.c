@@ -14,42 +14,73 @@ Author: Luke Phillips
                                 Initialization
 
 -----------------------------------------------------------------------------------------------*/
+
+// create global variables for gpio
+
+// variables for hall sensor inputs
+// change these to be on same gpio as timer 3 channels 
+uint16_t hall_A = PIN('A', 1);
+uint16_t hall_B = PIN('A', 2);
+uint16_t hall_C = PIN('A', 3);
+
+// pins for interfacing with H-bridge high side
+// change these to be on timer1 channels
+uint16_t A_high = PIN('A', 6);        // timer 3 channel 1 
+uint16_t B_high = PIN('A', 7);        // timer 3 channel 2
+uint16_t C_high = PIN('B', 0);        // timer 3 channel 3
+
+// pins for interfacing with H-bridge low side
+// set these to the same gpio as timer 1 complementary channels 
+uint16_t A_low = PIN('B', 3);
+uint16_t B_low = PIN('B', 4);
+uint16_t C_low = PIN('B', 5);
+
+
 static inline void __init__(void) {
     // enable IO port clocks 
     io_port_en(('A'-'A'), 1);
     io_port_en(('B'-'A'), 1);
 
-    // define pins and mode for hall sensor interface 
-    uint16_t hall_A = PIN('A', 1);
+    // define pin mode for hall sensor interface 
+    // change these to be on same gpio as timer 3 channels 
     gpio_set_mode(hall_A, GPI_MODE);
-    uint16_t hall_B = PIN('A', 2);
-    gpio_set_mode(hall_B, GPI_MODE);
-    uint16_t hall_C = PIN('A', 3); 
+    gpio_set_mode(hall_B, GPI_MODE); 
     gpio_set_mode(hall_C, GPI_MODE);
 
     // initialize 3 channels on timer 3 to be used for PWM 
     __tim3_pwm_init__();
 
     // initialize systick 
-    SysTick_init(1000);
+    SysTick_init(16000000 / 1000);          // intialize the SysTick to count every 1ms | 1khz
 
-    // define pins for H-Bridge interface (set up pins with timers properly)
-    uint16_t A_high = PIN('A', 6);        // timer 3 channel 1 
+    // define pin mode for H-Bridge interface (set up pins with timers properly)
+    // change these to be timer 1
+    
     gpio_set_mode(A_high, AF_MODE);
     gpio_set_af(A_high, AF1);
-    uint16_t B_high = PIN('A', 7);        // timer 3 channel 2
     gpio_set_mode(B_high, AF_MODE);
     gpio_set_af(B_high, AF1);
-    uint16_t C_high = PIN('B', 0);        // timer 3 channel 3
     gpio_set_mode(C_high, AF_MODE);
     gpio_set_af(C_high, AF1);
 
-    uint16_t A_low = PIN('B', 3);
+    // set these to the same gpio as timer 1 complementary channels 
     gpio_set_mode(A_low, GPO_MODE);
-    uint16_t B_low = PIN('B', 4);
     gpio_set_mode(B_low, GPO_MODE);
-    uint16_t C_low = PIN('B', 5);
     gpio_set_mode(C_low, GPO_MODE);
+}
+
+
+/*_____________________________________________________________________________________________
+
+                                Functions for Hall Effect Sensor 
+
+-----------------------------------------------------------------------------------------------*/
+
+// function to get states of hall effect sensors
+static inline void get_hall_states(bool* a, bool* b, bool* c) {
+    *a = gpio_read(hall_A);
+    *b = gpio_read(hall_B);
+    *c = gpio_read(hall_C);
 }
 
 
@@ -58,7 +89,7 @@ static inline void __init__(void) {
                                 "Lookup Table" for phase states wrt Hall effect sensors
 
 -----------------------------------------------------------------------------------------------*/
-// input a 3 bit number where the first 3 MSB's are the hall sensor levels and the LSB denotes the direction
+// may need some tending to depending on what input structure should look like
 static inline int from_table(uint16_t pos, bool dir, int* a, int* b, int* c) {
 
     int A, B, C, temp;

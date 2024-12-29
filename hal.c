@@ -141,7 +141,7 @@ bool timer_expired(uint32_t *t, uint32_t prd, uint32_t now) {
 -----------------------------------------------------------------------------------------------*/
 
 struct tim1 {
-  volatile uint32_t CR1, CR2, SMCR, DIER, SR, EGR, CCMR1_OCm, CCMR1_ICm, CCMR2_OCm, CCMR2_ICm, CCER, CNT, PSC,
+  volatile uint32_t CR1, CR2, SMCR, DIER, SR, EGR, CCMR1, CCMR2, CCER, CNT, PSC,
       ARR, RCR, CCR1, CCR2, CCR3, CCR4, BDTR, DCR, DMAR, RES, CCMR3, CCR5, CCR6, AF1, AF2, TISEL;
 };
 #define TIM1 ((struct tim1 *) 0x40012C00)       // TIM1 register address
@@ -164,6 +164,33 @@ struct tim3 {
 };
 #define TIM3 ((struct tim3 *) 0x40000400)
 
+// function to change the Auto reload register (ARR) - used for setting PWM frequency 
+static inline void tim3_pwm_freq(uint16_t freq) {
+  TIM3->ARR = freq;                       // pass new setting into register
+  TIM3->EGR |= BIT(0);                     // generate update event
+  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
+}
+
+// funtion to change duty cycles for pwm channels 1, 2, & 3
+// OCxPE bit in the CCMRx register must be set for these to update at update events
+static inline void tim3_pwm_duty(uint16_t c1_duty, uint16_t c2_duty, uint16_t c3_duty) {
+  TIM3->CCR1 = c1_duty;                    // pass new setting into register
+  TIM3->CCR2 = c2_duty;                    // pass new setting into register
+  TIM3->CCR3 = c3_duty;                    // pass new setting into register
+  TIM3->EGR |= BIT(0);                     // generate update event
+  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
+}
+
+// function to change the output states of each channel
+static inline void tim3_ch_en(bool a, bool b, bool c) {
+  uint16_t ccer = 0x0000;                // variable to store the enable bits for the ccer register
+  ccer |= (a << 0);                      // shift the values for a b and c into the dummy variable
+  ccer |= (b << 4);
+  ccer |= (c << 8);
+  TIM3->CCER &= 0xEEEE;                   // clear exisiting 
+  TIM3->CCER |= ccer;                     // set new enable values
+}
+
 // function to initialize PMW output on channels 1, 2 & 3
 // channel ports are set when initializing the gpio's 
 static inline void __tim3_pwm_init__(void) {
@@ -177,24 +204,8 @@ static inline void __tim3_pwm_init__(void) {
   TIM3->CCMR2 |= (0b1101 << 3);            // set channel 3 to OC PWM1 mode and enable the OC3 preload register
   TIM3->PSC = max_psc;                     // set prescaler to 64 (250kHz)  
   TIM3->CR1 |= BIT(0);                     // enable counter
-}
-
-// function to change the Auto reload register (ARR) - used for setting PWM frequency 
-static inline void tim3_pwm_freq(uint16_t freq) {
-  TIM3->ARR = freq;                       // pass new setting into register
-  TIM3->EGR |= BIT(0);                     // generate update event
-  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
-}
-
-// funtion to change duty cycles for pwm channels 1, 2, & 3
-// OCxPE bit in the CCMRx register must be set for these to update at update events
-static inline void tim3_pwm_duty(uint16_t c1_duty, uint16_t c2_duty, uint16_t c3_duty) {
-  
-  TIM3->CCR1 = c1_duty;                    // pass new setting into register
-  TIM3->CCR2 = c2_duty;                    // pass new setting into register
-  TIM3->CCR3 = c2_duty;                    // pass new setting into register
-  TIM3->EGR |= BIT(0);                     // generate update event
-  TIM3->EGR &= ~BIT(0);                    // clear UG bit 
+  tim3_pwm_freq(0x7FFF);                   // set default frequency to 1/2 of prescaled clock
+  tim3_pwm_duty(0x7FFF, 0x7FFF, 0x7FFF);   // set default duty cycle to 50%
 }
 
 /*_____________________________________________________________________________________________

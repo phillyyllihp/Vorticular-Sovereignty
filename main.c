@@ -12,9 +12,17 @@ int main(void){
 
    // initialize chip 
    __init__();
+   tim3_ch_en(1, 0, 0);
+   tim3_pwm_freq(0x0AFF);
+   tim3_pwm_duty(0xFFFE, 0x7FFF, 0x7FFF);
 
     // main loop
     while(1){      
+
+      tim3_ch_en(0, 0, 0);
+      delay(1000);
+      tim3_ch_en(1, 0, 0);
+      delay(1000);
 
       /* implement FOC controls  outer loop -> Position: PID with input approximated from fused hall and encoder data
                                  middle loop -> Speed: PID with input of derivative of position approximation
