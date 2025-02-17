@@ -91,4 +91,5 @@ extern void _estack(void);  // Defined in link.ld
 
 // 16 standard and 32 STM32-specific handlers
 __attribute__((section(".vectors"))) void (*const tab[16 + 32])(void) = {
-    _estack, _reset, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, SysTick_Handler};
+    _estack, _reset, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, SysTick_Handler,
+     0, 0, 0, 0, 0, 0, 0, EXTI4_15_Handler};

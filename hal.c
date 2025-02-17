@@ -106,6 +106,7 @@ struct stk {
 #define STK ((struct stk *) 0xE000E010)           // location of the systick register
 
 // function to initiate the ARM systick timer PM0223 datasheet
+// set ticks to 16000000 / 1000 for 1kHz ticks
 static inline void SysTick_init(uint32_t ticks) {
   if ((ticks-1) > 0xFFFFFF) return;               // limited to 24 bit timer
   STK->RVR = ticks-1;                             // set the value to be loaded 
@@ -120,6 +121,7 @@ void SysTick_Handler(void) {
   s_ticks++;
 }
 
+// depends on init ticks input
 void delay(unsigned ms) {
   uint32_t wait = s_ticks + ms;                   // time to wait 
   while(s_ticks < wait) (void) 0;                 // wait until its time    
@@ -146,11 +148,51 @@ struct tim1 {
 };
 #define TIM1 ((struct tim1 *) 0x40012C00)       // TIM1 register address
 
-// make init for 3 phase output 
+// function to change the Auto reload register (ARR) - used for setting PWM frequency 
+static inline void tim1_pwm_freq(uint16_t freq) {
+  TIM1->ARR = freq;                        // pass new setting into register
+  TIM1->EGR |= BIT(0);                     // generate update event
+  TIM1->EGR &= ~BIT(0);                    // clear UG bit 
+}
 
-// maybe also make contol functions for 3phase output
+// funtion to change duty cycles for pwm channels 1, 2, & 3
+// OCxPE bit in the CCMRx register must be set for these to update at update events
+static inline void tim1_pwm_duty(uint16_t c1_duty, uint16_t c2_duty, uint16_t c3_duty) {
+  TIM1->CCR1 = c1_duty;                    // pass new setting into register
+  TIM1->CCR2 = c2_duty;                    // pass new setting into register
+  TIM1->CCR3 = c3_duty;                    // pass new setting into register
+  TIM1->EGR |= BIT(0);                     // generate update event
+  TIM1->EGR &= ~BIT(0);                    // clear UG bit 
+}
 
-// need input timer 
+// function to change the output states of each channel
+static inline void tim1_ch_en(bool a, bool b, bool c) {
+  uint16_t ccer = 0x0000;                // variable to store the enable bits for the ccer register
+  ccer |= (a << 0);                      // shift the values for a b and c into the dummy variable
+  ccer |= (b << 4);
+  ccer |= (c << 8);
+  TIM1->CCER &= 0xEEEE;                   // clear exisiting 
+  TIM1->CCER |= ccer;                     // set new enable values
+}
+
+
+// function to initialize PMW output on channels 1, 2 & 3
+// channel ports are set when initializing the gpio's 
+static inline void __tim1_pwm_init__(void) {
+  uint16_t max_psc = 16000000/250000-1;    // internal oscillator runs at 16MHz / desired switching speed for transistors in H-Bridge
+  RCC->APBENR2 |= BIT(11);                 // enable timer1 peripheral clock 
+  RCC->APBRSTR2 |= BIT(11);                // reset timer1 
+  RCC->APBRSTR2 &= ~BIT(11);               // clear timer1 reset bit
+  TIM1->CR1 |= BIT(7);                     // enable auto reload preload register
+  TIM1->CCMR1 |= (0b1101 << 3);            // set channel 1 to OC PWM1 mode and enable the OC1 preload register
+  TIM1->CCMR1 |= (0b1101 << 11);           // set channel 2 to OC PWM1 mode enable the OC2 preload register
+  TIM1->CCMR2 |= (0b1101 << 3);            // set channel 3 to OC PWM1 mode and enable the OC3 preload register
+  TIM1->PSC = max_psc;                     // set prescaler to 64 (250kHz)  
+  TIM1->CR1 |= BIT(0);                     // enable counter
+  tim1_pwm_freq(0x7FFF);                   // set default frequency to 1/2 of prescaled clock
+  tim1_pwm_duty(0x7FFF, 0x7FFF, 0x7FFF);   // set default duty cycle to 50%
+}
+
 
 /*_____________________________________________________________________________________________
 
@@ -210,6 +252,88 @@ static inline void __tim3_pwm_init__(void) {
 
 /*_____________________________________________________________________________________________
 
+                                ADC
+
+------------------------------------------------------------------------------------------------*/
+
+// create a structure for the adc registers
+struct adc {
+  volatile uint32_t ISR, IER, CR, CFGR1, CFGR2, SMPR, BLANK1[2], AWD1TR, AWD2TR, CHSELR0,
+      CHSELR1, AWD3TR, BLANK2[4], DR, BLANK3[24], AWD2CR, AWD3CR, BLANK4[4], CALFACT, BLANK4[149], CCR
+};
+#define ADC ((struct adc *) 0x40010080)
+
+// function to calibrate the adc
+// the adc must have the voltage regulator enabled and stable, the adc dissabled, and the DMA dissabled
+static inline void adc_calibrate(bool* calibrated, uint8_t* CAL_fact) {
+  bool ADEN_bit, ADVREGEN_bit, DMAEN_bit, EOCAL;
+  ADC->ISR |= BIT(11);                              // clear the end of callibration flag bit - EOCAL 
+  ADEN_bit = ADC->CR & BIT(0);                     // read the adc en bit
+  ADVREGEN_bit = ADC->CR & BIT(28);                 // read the adc voltage regulator en bit
+  DMAEN_bit = ADC->CFGR1 & BIT(0);                  // read the DMA en bit
+  EOCAL = ADC->ISR & BIT(11);                       // read the EOCAL bit
+
+  // check that the adc is not enabled, the regulator is on, and the DMAEN is not enabled
+  if (~ADEN_bit & ADVREGEN_bit & ~DMAEN_bit) {
+    ADC->CR |= BIT(31);                             // begin the calibration 
+    // wait until end of calibration flag bit is set
+    while(~EOCAL){
+      EOCAL = ADC->ISR & BIT(11);                   // read the EOCAL bit
+    }
+    ADC->ISR |= BIT(11);                            // clear the end of callibration flag bit - EOCAL
+    *CAL_fact = ADC->CALFACT & 0x3F;                // return the 6lsb's of calfact reg. 
+    *calibrated = true;                             // return that the calibration was complete
+  }
+  else {
+    *calibrated = false;                            // return that the calibration was incomplete
+  }
+}
+
+// function to initialize and calibrate the adc
+static inline void __adc_init__(void) {
+  bool adc_cal_check;
+  uint8_t adc_cal_fact;
+  ADC->CR |= BIT(28);                               // enable the internal voltage regulator in the cr register
+  delay(1);                                         //delay 1ms - minimum 20us spec'd in datasheet
+  adc_calibrate(&adc_cal_check, &adc_cal_fact);     //calibrate (finished when adc cal bit is cleared by hardware)
+}
+
+// funtion to enable the adc 
+// the adc should have the voltage regulator enabled and stable as well as be calibrated before using this function 
+static inline void adc_enable(void) {
+  bool ADRDY;                            
+  ADC->ISR |= BIT(0);                             // clear the ADRDY bit
+  ADC->CR |= BIT(0);                              // set the adc enable bit
+  ADRDY = ADC->ISR & BIT(0);                      // read the ADC ready flag
+  // wait for the ADC ready flag to be set
+  while(~ADRDY) {
+    ADRDY = ADC->ISR & BIT(0);                    // read the adc ready flag until set
+  }
+}
+
+// function to disable the adc
+// the adc should have the voltage regulator enabled and stable as well as be calibrated before usign this function 
+static inline void adc_disable(void) {
+  bool ADSTART, ADSTP, ADDIS;
+  ADSTART = ADC->CR & BIT(2);
+  if (ADSTART) {
+    ADC->CR |= BIT(4);                            // stop the adc conversion process
+    ADSTP = ADC->CR & BIT(4);                     // read the ADSTP bit
+    // wait for hardware to clear the ADSTP bit
+    while(ADSTP) {
+      ADSTP = ADC->CR & BIT(4);                     // read the ADSTP bit
+    }
+  }
+  ADC->CR |= BIT(1);                              // set the ADC dissable bit
+  ADDIS = ADC->CR & BIT(1);                       // read the ADC dissable bit
+  while (ADDIS) {
+    ADDIS = ADC->CR & BIT(1);                       // read the ADC dissable bit unit cleared
+  }
+}
+
+
+/*_____________________________________________________________________________________________
+
                                 INTERRUPTS
 
 ------------------------------------------------------------------------------------------------*/
@@ -227,7 +351,7 @@ struct exti {
 };
 #define EXTI ((struct exti *) 0x40021800)
 
-
+// function to set a gpio pin to trigger an interrupt on a rising or falling edge event
 void gpio_interrupt_init(uint16_t pin) {
   int x, m;                                         // variables for selecting EXTICR x and m
   
@@ -236,6 +360,7 @@ void gpio_interrupt_init(uint16_t pin) {
   x = PINNO(pin)/4;                                 // is index of EXTICRx register, (x-1)
   m = PINNO(pin)%4;                                 // multiplier to shift into EXTICRx
   EXTI->RTSR1 |= BIT(PINNO(pin));                   // select line to be a rising edge trigger
+  EXTI->FTSR1 |= BIT(PINNO(pin));                   // select line to be a falling edge trigger too
   EXTI->EXTICR[x] |= (PINBANK(pin) << m*8);         // select pin port "pin" as interrupt source
   EXTI->IMR1 |= BIT(PINNO(pin));                    // unmask interrupt on selected line
 
@@ -254,28 +379,4 @@ static inline void spin(volatile uint32_t count) {
   while(count--) (void) 0;
 }
 
-
-/*_____________________________________________________________________________________________
-
-
-                        Interrupt Service Routines (ISR)
-
------------------------------------------------------------------------------------------------*/
-
-static volatile uint32_t button_mode;                // volatile var to store button setting / speed multiplier
-// function to handle interrupt on EXTI lines 4 to 15
-void EXTI4_15_Handler(void) {
-
-  spin(10000);
-  
-  button_mode++;                                    // increase the speed multiplier from 1 to 3                            
-  if (button_mode > 3) {
-    button_mode = 1;
-  }
-  EXTI->RPR1 |= BIT(13);                            // clear pending interupt bit
-  NVIC->ICPR |= BIT(7);                             //clear interupt flag
-
-}
-
 //_____________________________________________________________________________________________//
-
